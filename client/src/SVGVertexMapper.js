@@ -4,7 +4,7 @@ import { Input } from "./components/ui/input/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip/tooltip";
 import { useToast } from "./hooks/use-toast";
 import { Toaster } from "./components/ui/toaster";
-import { Layers, Trash2, Link2, Check, Copy, AlertCircle } from "lucide-react";
+import { MapPin, Network, GitGraph, Trash2, Link2, Check, Copy, AlertCircle } from "lucide-react";
 
 function SVGVertexMapper() {
   const { toast } = useToast();
@@ -230,7 +230,7 @@ function SVGVertexMapper() {
       <Toaster />
       <div className="bg-white shadow-xl rounded-lg p-8">
         <h1 className="text-4xl font-extrabold mb-6 text-center text-gray-800 flex items-center justify-center gap-3">
-          <Layers className="w-10 h-10 text-blue-600" />
+          <Network className="w-10 h-10 text-purple-600" />
           Indoor Mapping Vertex Mapper
         </h1>
         
@@ -335,7 +335,7 @@ function SVGVertexMapper() {
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <h2 className="text-xl mb-2 font-semibold flex items-center gap-2">
-                    <Layers className="h-5 w-5 text-blue-600" />
+                    <MapPin className="h-5 w-5 text-blue-600" />
                     Vertices ({vertices.length})
                   </h2>
                   <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
@@ -345,7 +345,7 @@ function SVGVertexMapper() {
                 
                 <div>
                   <h2 className="text-xl mb-2 font-semibold flex items-center gap-2">
-                    <Link2 className="h-5 w-5 text-green-600" />
+                    <GitGraph className="h-5 w-5 text-green-600" />
                     Edges ({edges.length})
                   </h2>
                   <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
