@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button } from "./components/ui/button/button";
 import { Input } from "./components/ui/input/input";
 
 function SVGVertexMapper() {
-  const [svgFile, setSvgFile] = useState(null);
   const [svgContent, setSvgContent] = useState('');
   const [vertices, setVertices] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -13,8 +12,6 @@ function SVGVertexMapper() {
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
-    setSvgFile(file);
-
     const reader = new FileReader();
     reader.onload = (e) => {
       setSvgContent(e.target.result);
