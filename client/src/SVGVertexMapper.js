@@ -1,59 +1,97 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button } from "./components/ui/button/button";
 import { Input } from "./components/ui/input/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip/tooltip";
+import { useToast } from "./hooks/use-toast";
+import { Toaster } from "./components/ui/toaster";
+import { Layers, Trash2, Link2, Check, Copy, AlertCircle } from "lucide-react";
 
 function SVGVertexMapper() {
+  const { toast } = useToast();
   const [svgContent, setSvgContent] = useState('');
+  const [svgDimensions, setSvgDimensions] = useState({ width: 0, height: 0 });
   const [vertices, setVertices] = useState([]);
   const [edges, setEdges] = useState([]);
-  const [copiedText, setCopiedText] = useState('');
   const [currentStage, setCurrentStage] = useState('vertices');
   const [selectedEdgeVertices, setSelectedEdgeVertices] = useState([]);
+  const svgRef = useRef(null);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     const reader = new FileReader();
     reader.onload = (e) => {
-      setSvgContent(e.target.result);
+      const svgString = e.target.result;
+      setSvgContent(svgString);
+
+      // Create a temporary SVG to get its dimensions
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = svgString;
+      const svgElement = tempDiv.querySelector('svg');
+      
+      const width = svgElement.getAttribute('width') 
+        ? parseFloat(svgElement.getAttribute('width')) 
+        : svgElement.viewBox.baseVal.width;
+      
+      const height = svgElement.getAttribute('height') 
+        ? parseFloat(svgElement.getAttribute('height')) 
+        : svgElement.viewBox.baseVal.height;
+
+      setSvgDimensions({ width, height });
     };
     reader.readAsText(file);
   };
 
-  const handleVertexSVGClick = (event) => {
-    if (currentStage !== 'vertices') return;
+  const calculateSVGCoordinates = (event) => {
+    if (!svgRef.current) return null;
 
-    const svg = event.target.closest('svg');
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const svgPoint = point.matrixTransform(svg.getScreenCTM().inverse());
+    const div = svgRef.current;
+    const svg = div.querySelector('svg');
+    if (!svg) return null;
+
+    const rect = svg.getBoundingClientRect();
+    const scaleX = svgDimensions.width / rect.width;
+    const scaleY = svgDimensions.height / rect.height;
+
+    // Get click coordinates relative to SVG
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    return {
+      x: x * scaleX,
+      y: y * scaleY
+    };
+  };
+
+  const handleVertexSVGClick = (event) => {
+    if (currentStage !== 'vertices' || !svgContent) return;
+
+    const coordinates = calculateSVGCoordinates(event);
+    if (!coordinates) return;
 
     const objectName = prompt('Enter object name (optional, press cancel for null):') || null;
 
     const newVertex = {
       id: `v${vertices.length + 1}`,
       objectName,
-      cx: svgPoint.x,
-      cy: svgPoint.y
+      cx: coordinates.x,
+      cy: coordinates.y
     };
 
     setVertices([...vertices, newVertex]);
+    toast({ title: "Success", description: "Vertex added successfully" });
   };
 
   const handleEdgeSVGClick = (event) => {
-    if (currentStage !== 'edges') return;
+    if (currentStage !== 'edges' || !svgContent) return;
 
-    const svg = event.target.closest('svg');
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const svgPoint = point.matrixTransform(svg.getScreenCTM().inverse());
+    const coordinates = calculateSVGCoordinates(event);
+    if (!coordinates) return;
 
     // Find the closest vertex
     const closestVertex = vertices.reduce((closest, vertex) => {
       const distance = Math.sqrt(
-        Math.pow(vertex.cx - svgPoint.x, 2) + 
-        Math.pow(vertex.cy - svgPoint.y, 2)
+        Math.pow(vertex.cx - coordinates.x, 2) + 
+        Math.pow(vertex.cy - coordinates.y, 2)
       );
       return (closest === null || distance < closest.distance) 
         ? { vertex, distance } 
@@ -69,6 +107,7 @@ function SVGVertexMapper() {
       if (!isAlreadySelected) {
         const newSelectedVertices = [...selectedEdgeVertices, closestVertex.vertex];
         setSelectedEdgeVertices(newSelectedVertices);
+        toast({ title: "Success", description: "Vertex selected for edge" });
       }
     }
   };
@@ -92,6 +131,9 @@ function SVGVertexMapper() {
         };
 
         setEdges([...edges, newEdge]);
+        toast({ title: "Success", description: "Edge created successfully" });
+      } else {
+        toast({ title: "Warning", description: "This edge already exists" });
       }
 
       // Reset selection to last vertex to allow continuous edge creation
@@ -103,8 +145,10 @@ function SVGVertexMapper() {
     if (currentStage === 'vertices') {
       setVertices([]);
       setEdges([]);
+      toast({ title: "Info", description: "All vertices and edges reset" });
     } else {
       setSelectedEdgeVertices([]);
+      toast({ title: "Info", description: "Edge selection reset" });
     }
   };
 
@@ -119,30 +163,36 @@ function SVGVertexMapper() {
     );
 
     navigator.clipboard.writeText(jsonOutput).then(() => {
-      setCopiedText('Copied!');
-      setTimeout(() => setCopiedText(''), 2000);
+      toast({ title: "Success", description: "JSON copied to clipboard" });
     }).catch(err => {
+      toast({ title: "Error", description: "Failed to copy JSON" });
       console.error('Failed to copy: ', err);
     });
   };
 
   const renderSVGWithVertices = () => {
-    // Create a deep copy of the SVG content
+    if (!svgContent) return '';
+    
     const parser = new DOMParser();
     const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
     const svgElement = svgDoc.documentElement;
 
-    // Add vertex markers
+    // Set viewBox if not present
+    if (!svgElement.hasAttribute('viewBox')) {
+      svgElement.setAttribute('viewBox', `0 0 ${svgDimensions.width} ${svgDimensions.height}`);
+    }
+    svgElement.setAttribute('width', '100%');
+    svgElement.setAttribute('height', '100%');
+    svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    // Add vertex markers and edges
     vertices.forEach(vertex => {
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('cx', vertex.cx);
       circle.setAttribute('cy', vertex.cy);
       circle.setAttribute('r', '5');
-      
-      // Vertices in grey in both stages
       circle.setAttribute('fill', 'gray');
 
-      // Highlight selected vertices in edges stage
       if (currentStage === 'edges') {
         const isSelectedEdgeVertex = selectedEdgeVertices.some(v => v.id === vertex.id);
         if (isSelectedEdgeVertex) {
@@ -153,7 +203,6 @@ function SVGVertexMapper() {
       svgElement.appendChild(circle);
     });
 
-    // Add edges
     if (currentStage === 'edges') {
       edges.forEach(edge => {
         const fromVertex = vertices.find(v => v.id === edge.from);
@@ -173,117 +222,150 @@ function SVGVertexMapper() {
       });
     }
 
-    // Serialize the modified SVG back to a string
-    const serializer = new XMLSerializer();
-    return serializer.serializeToString(svgElement);
+    return svgElement.outerHTML;
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-center text-gray-800">
-        Indoor Mapping Vertex Mapper
-      </h1>
-      
-      <div className="mb-4">
-        <Input 
-          type="file" 
-          accept=".svg" 
-          onChange={handleFileUpload} 
-          className="mb-2 w-full"
-          placeholder="Upload SVG Floor Plan"
-        />
-      </div>
-
-      {svgContent && (
-        <div className="space-y-4">
-          <div 
-            dangerouslySetInnerHTML={{ 
-              __html: renderSVGWithVertices()
-            }}
-            onClick={
-              currentStage === 'vertices' 
-                ? handleVertexSVGClick 
-                : handleEdgeSVGClick
-            }
-            className="cursor-pointer border-4 border-gray-300 hover:border-blue-500 transition-all"
+    <div className="p-6 max-w-5xl mx-auto bg-gray-50 min-h-screen">
+      <Toaster />
+      <div className="bg-white shadow-xl rounded-lg p-8">
+        <h1 className="text-4xl font-extrabold mb-6 text-center text-gray-800 flex items-center justify-center gap-3">
+          <Layers className="w-10 h-10 text-blue-600" />
+          Indoor Mapping Vertex Mapper
+        </h1>
+        
+        <div className="mb-6 flex items-center space-x-4">
+          <Input 
+            type="file" 
+            accept=".svg" 
+            onChange={handleFileUpload} 
+            className="flex-grow"
+            placeholder="Upload SVG Floor Plan"
           />
-          
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="space-x-2">
-                {currentStage === 'vertices' ? (
+          {svgContent && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <Button 
-                    onClick={() => setCurrentStage('edges')}
-                    disabled={vertices.length < 2}
-                    className="bg-green-500 hover:bg-green-600"
+                    variant="destructive" 
+                    size="icon" 
+                    onClick={() => {
+                      setSvgContent('');
+                      setVertices([]);
+                      setEdges([]);
+                      setCurrentStage('vertices');
+                    }}
                   >
-                    Proceed to Edges
+                    <Trash2 className="h-5 w-5" />
                   </Button>
-                ) : (
-                  <>
-                    <Button 
-                      onClick={confirmEdge}
-                      disabled={selectedEdgeVertices.length !== 2}
-                      className="bg-blue-500 hover:bg-blue-600"
-                    >
-                      Confirm Edge
-                    </Button>
-                    <Button 
-                      onClick={() => setCurrentStage('vertices')}
-                      variant="secondary"
-                    >
-                      Back to Vertices
-                    </Button>
-                  </>
-                )}
-                
-                <Button 
-                  variant="destructive" 
-                  onClick={handleReset}
-                  className="bg-red-500 hover:bg-red-600"
-                >
-                  Reset {currentStage === 'vertices' ? 'All' : 'Selection'}
-                </Button>
-              </div>
-
-              {vertices.length > 0 && edges.length > 0 && (
-                <Button 
-                  onClick={handleCopyJSON}
-                  className="bg-purple-500 hover:bg-purple-600"
-                >
-                  Copy Full JSON
-                </Button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h2 className="text-xl mb-2 font-semibold">
-                  Vertices ({vertices.length})
-                </h2>
-                <pre className="bg-gray-100 p-2 rounded max-h-64 overflow-auto">
-                  {JSON.stringify(vertices, null, 2)}
-                </pre>
-              </div>
-              
-              <div>
-                <h2 className="text-xl mb-2 font-semibold">
-                  Edges ({edges.length})
-                </h2>
-                <pre className="bg-gray-100 p-2 rounded max-h-64 overflow-auto">
-                  {JSON.stringify(edges, null, 2)}
-                </pre>
-              </div>
-            </div>
-
-            {copiedText && (
-              <p className="text-green-600 text-center mt-2">
-                {copiedText}
-              </p>
-            )}
-          </div>
+                </TooltipTrigger>
+                <TooltipContent>Clear Floor Plan</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
-      )}
+
+        {svgContent && (
+          <div className="space-y-6">
+            <div 
+              ref={svgRef}
+              dangerouslySetInnerHTML={{ 
+                __html: renderSVGWithVertices()
+              }}
+              onClick={
+                currentStage === 'vertices' 
+                  ? handleVertexSVGClick 
+                  : handleEdgeSVGClick
+              }
+              className="cursor-pointer border-4 border-gray-300 hover:border-blue-500 transition-all rounded-lg overflow-hidden"
+            />
+            
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <div className="space-x-4">
+                  {currentStage === 'vertices' ? (
+                    <Button 
+                      onClick={() => setCurrentStage('edges')}
+                      disabled={vertices.length < 2}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Link2 className="mr-2 h-5 w-5" />
+                      Proceed to Edges
+                    </Button>
+                  ) : (
+                    <>
+                      <Button 
+                        onClick={confirmEdge}
+                        disabled={selectedEdgeVertices.length !== 2}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Check className="mr-2 h-5 w-5" />
+                        Confirm Edge
+                      </Button>
+                      <Button 
+                        onClick={() => setCurrentStage('vertices')}
+                        variant="secondary"
+                      >
+                        Back to Vertices
+                      </Button>
+                    </>
+                  )}
+                  
+                  <Button 
+                    variant="destructive" 
+                    onClick={handleReset}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    <Trash2 className="mr-2 h-5 w-5" />
+                    Reset {currentStage === 'vertices' ? 'All' : 'Selection'}
+                  </Button>
+                </div>
+
+                {vertices.length > 0 && edges.length > 0 && (
+                  <Button 
+                    onClick={handleCopyJSON}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    <Copy className="mr-2 h-5 w-5" />
+                    Copy Full JSON
+                  </Button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <h2 className="text-xl mb-2 font-semibold flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-blue-600" />
+                    Vertices ({vertices.length})
+                  </h2>
+                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
+                    {JSON.stringify(vertices, null, 2)}
+                  </pre>
+                </div>
+                
+                <div>
+                  <h2 className="text-xl mb-2 font-semibold flex items-center gap-2">
+                    <Link2 className="h-5 w-5 text-green-600" />
+                    Edges ({edges.length})
+                  </h2>
+                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
+                    {JSON.stringify(edges, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!svgContent && (
+          <div className="text-center py-12 bg-gray-100 rounded-lg">
+            <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+            <p className="text-gray-600 text-lg">
+              Please upload an SVG floor plan to get started
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
