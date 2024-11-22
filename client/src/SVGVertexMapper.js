@@ -14,29 +14,36 @@ function SVGVertexMapper() {
   const [edges, setEdges] = useState([]);
   const [currentStage, setCurrentStage] = useState('vertices');
   const [selectedEdgeVertices, setSelectedEdgeVertices] = useState([]);
+  const [isCopying, setIsCopying] = useState(false);
   const svgRef = useRef(null);
+  const containerRef = useRef(null);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     const reader = new FileReader();
     reader.onload = (e) => {
       const svgString = e.target.result;
-      setSvgContent(svgString);
-
-      // Create a temporary SVG to get its dimensions
+      
+      // Create a temporary SVG to get its natural dimensions
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = svgString;
       const svgElement = tempDiv.querySelector('svg');
       
-      const width = svgElement.getAttribute('width') 
-        ? parseFloat(svgElement.getAttribute('width')) 
-        : svgElement.viewBox.baseVal.width;
+      // Get the original dimensions from viewBox or width/height attributes
+      let width, height;
       
-      const height = svgElement.getAttribute('height') 
-        ? parseFloat(svgElement.getAttribute('height')) 
-        : svgElement.viewBox.baseVal.height;
+      if (svgElement.hasAttribute('viewBox')) {
+        const viewBox = svgElement.viewBox.baseVal;
+        width = viewBox.width;
+        height = viewBox.height;
+      } else {
+        width = parseFloat(svgElement.getAttribute('width')) || 0;
+        height = parseFloat(svgElement.getAttribute('height')) || 0;
+      }
 
+      // Store original dimensions
       setSvgDimensions({ width, height });
+      setSvgContent(svgString);
     };
     reader.readAsText(file);
   };
@@ -44,21 +51,23 @@ function SVGVertexMapper() {
   const calculateSVGCoordinates = (event) => {
     if (!svgRef.current) return null;
 
-    const div = svgRef.current;
-    const svg = div.querySelector('svg');
+    const svg = svgRef.current.querySelector('svg');
     if (!svg) return null;
 
-    const rect = svg.getBoundingClientRect();
-    const scaleX = svgDimensions.width / rect.width;
-    const scaleY = svgDimensions.height / rect.height;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
 
-    // Get click coordinates relative to SVG
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    // Get click point in screen coordinates
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
 
+    // Transform to SVG coordinates using the inverse matrix
+    const svgPoint = point.matrixTransform(ctm.inverse());
+    
     return {
-      x: x * scaleX,
-      y: y * scaleY
+      x: svgPoint.x,
+      y: svgPoint.y
     };
   };
 
@@ -78,7 +87,10 @@ function SVGVertexMapper() {
     };
 
     setVertices([...vertices, newVertex]);
-    toast({ title: "Success", description: "Vertex added successfully" });
+    toast({
+      title: "Vertex Added",
+      description: `Added vertex at (${coordinates.x.toFixed(2)}, ${coordinates.y.toFixed(2)})`,
+    });
   };
 
   const handleEdgeSVGClick = (event) => {
@@ -87,7 +99,7 @@ function SVGVertexMapper() {
     const coordinates = calculateSVGCoordinates(event);
     if (!coordinates) return;
 
-    // Find the closest vertex
+    // Find the closest vertex using SVG coordinates
     const closestVertex = vertices.reduce((closest, vertex) => {
       const distance = Math.sqrt(
         Math.pow(vertex.cx - coordinates.x, 2) + 
@@ -99,7 +111,6 @@ function SVGVertexMapper() {
     }, null);
 
     if (closestVertex && closestVertex.distance < 20) {
-      // Check if this vertex is already in the selected vertices
       const isAlreadySelected = selectedEdgeVertices.some(
         v => v.id === closestVertex.vertex.id
       );
@@ -107,14 +118,18 @@ function SVGVertexMapper() {
       if (!isAlreadySelected) {
         const newSelectedVertices = [...selectedEdgeVertices, closestVertex.vertex];
         setSelectedEdgeVertices(newSelectedVertices);
-        toast({ title: "Success", description: "Vertex selected for edge" });
+        toast({
+          title: "Vertex Selected",
+          description: `Selected vertex ${closestVertex.vertex.id}${
+            closestVertex.vertex.objectName ? ` (${closestVertex.vertex.objectName})` : ''
+          }`,
+        });
       }
     }
   };
 
   const confirmEdge = () => {
     if (selectedEdgeVertices.length === 2) {
-      // Prevent duplicate edges
       const isDuplicateEdge = edges.some(
         edge => 
           (edge.from === selectedEdgeVertices[0].id && 
@@ -131,12 +146,18 @@ function SVGVertexMapper() {
         };
 
         setEdges([...edges, newEdge]);
-        toast({ title: "Success", description: "Edge created successfully" });
+        toast({
+          title: "Edge Created",
+          description: `Created edge between ${selectedEdgeVertices[0].id} and ${selectedEdgeVertices[1].id}`,
+        });
       } else {
-        toast({ title: "Warning", description: "This edge already exists" });
+        toast({
+          title: "Warning",
+          description: "This edge already exists",
+          variant: "destructive"
+        });
       }
 
-      // Reset selection to last vertex to allow continuous edge creation
       setSelectedEdgeVertices([selectedEdgeVertices[1]]);
     }
   };
@@ -145,14 +166,21 @@ function SVGVertexMapper() {
     if (currentStage === 'vertices') {
       setVertices([]);
       setEdges([]);
-      toast({ title: "Info", description: "All vertices and edges reset" });
+      toast({
+        title: "Reset Complete",
+        description: "All vertices and edges have been cleared"
+      });
     } else {
       setSelectedEdgeVertices([]);
-      toast({ title: "Info", description: "Edge selection reset" });
+      toast({
+        title: "Selection Reset",
+        description: "Edge selection has been cleared"
+      });
     }
   };
 
-  const handleCopyJSON = () => {
+  const handleCopyJSON = async () => {
+    setIsCopying(true);
     const jsonOutput = JSON.stringify(
       { 
         "vertices": vertices,
@@ -162,12 +190,22 @@ function SVGVertexMapper() {
       4
     );
 
-    navigator.clipboard.writeText(jsonOutput).then(() => {
-      toast({ title: "Success", description: "JSON copied to clipboard" });
-    }).catch(err => {
-      toast({ title: "Error", description: "Failed to copy JSON" });
+    try {
+      await navigator.clipboard.writeText(jsonOutput);
+      toast({
+        title: "Copied!",
+        description: "JSON data has been copied to clipboard",
+      });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to copy JSON data",
+        variant: "destructive"
+      });
       console.error('Failed to copy: ', err);
-    });
+    } finally {
+      setIsCopying(false);
+    }
   };
 
   const renderSVGWithVertices = () => {
@@ -177,15 +215,37 @@ function SVGVertexMapper() {
     const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
     const svgElement = svgDoc.documentElement;
 
-    // Set viewBox if not present
-    if (!svgElement.hasAttribute('viewBox')) {
-      svgElement.setAttribute('viewBox', `0 0 ${svgDimensions.width} ${svgDimensions.height}`);
+    // Preserve original dimensions and viewBox
+    if (svgDimensions.width && svgDimensions.height) {
+      svgElement.setAttribute('width', svgDimensions.width);
+      svgElement.setAttribute('height', svgDimensions.height);
+      
+      if (!svgElement.hasAttribute('viewBox')) {
+        svgElement.setAttribute('viewBox', `0 0 ${svgDimensions.width} ${svgDimensions.height}`);
+      }
     }
-    svgElement.setAttribute('width', '100%');
-    svgElement.setAttribute('height', '100%');
-    svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    // Remove any preserveAspectRatio to maintain exact proportions
+    svgElement.removeAttribute('preserveAspectRatio');
 
     // Add vertex markers and edges
+    edges.forEach(edge => {
+      const fromVertex = vertices.find(v => v.id === edge.from);
+      const toVertex = vertices.find(v => v.id === edge.to);
+      
+      if (fromVertex && toVertex) {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', fromVertex.cx);
+        line.setAttribute('y1', fromVertex.cy);
+        line.setAttribute('x2', toVertex.cx);
+        line.setAttribute('y2', toVertex.cy);
+        line.setAttribute('stroke', 'green');
+        line.setAttribute('stroke-width', '2');
+        
+        svgElement.appendChild(line);
+      }
+    });
+
     vertices.forEach(vertex => {
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('cx', vertex.cx);
@@ -203,30 +263,11 @@ function SVGVertexMapper() {
       svgElement.appendChild(circle);
     });
 
-    if (currentStage === 'edges') {
-      edges.forEach(edge => {
-        const fromVertex = vertices.find(v => v.id === edge.from);
-        const toVertex = vertices.find(v => v.id === edge.to);
-        
-        if (fromVertex && toVertex) {
-          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          line.setAttribute('x1', fromVertex.cx);
-          line.setAttribute('y1', fromVertex.cy);
-          line.setAttribute('x2', toVertex.cx);
-          line.setAttribute('y2', toVertex.cy);
-          line.setAttribute('stroke', 'green');
-          line.setAttribute('stroke-width', '2');
-          
-          svgElement.appendChild(line);
-        }
-      });
-    }
-
     return svgElement.outerHTML;
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto bg-gray-50 min-h-screen">
+    <div className="p-6 max-w-full mx-auto bg-gray-50 min-h-screen">
       <Toaster />
       <div className="bg-white shadow-xl rounded-lg p-8">
         <h1 className="text-4xl font-extrabold mb-6 text-center text-gray-800 flex items-center justify-center gap-3">
@@ -267,21 +308,27 @@ function SVGVertexMapper() {
 
         {svgContent && (
           <div className="space-y-6">
-            <div 
-              ref={svgRef}
-              dangerouslySetInnerHTML={{ 
-                __html: renderSVGWithVertices()
-              }}
-              onClick={
-                currentStage === 'vertices' 
-                  ? handleVertexSVGClick 
-                  : handleEdgeSVGClick
-              }
-              className="cursor-pointer border-4 border-gray-300 hover:border-blue-500 transition-all rounded-lg overflow-hidden"
-            />
+            <div className="overflow-x-auto overflow-y-auto max-h-[70vh]" ref={containerRef}>
+              <div 
+                ref={svgRef}
+                dangerouslySetInnerHTML={{ 
+                  __html: renderSVGWithVertices()
+                }}
+                onClick={
+                  currentStage === 'vertices' 
+                    ? handleVertexSVGClick 
+                    : handleEdgeSVGClick
+                }
+                className="cursor-pointer border-4 border-gray-300 hover:border-blue-500 transition-all rounded-lg inline-block"
+                style={{
+                  minWidth: svgDimensions.width ? `${svgDimensions.width}px` : 'auto',
+                  minHeight: svgDimensions.height ? `${svgDimensions.height}px` : 'auto'
+                }}
+              />
+            </div>
             
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
+              <div className="flex flex-wrap gap-4 justify-between items-center">
                 <div className="space-x-4">
                   {currentStage === 'vertices' ? (
                     <Button 
@@ -322,23 +369,42 @@ function SVGVertexMapper() {
                 </div>
 
                 {vertices.length > 0 && edges.length > 0 && (
-                  <Button 
-                    onClick={handleCopyJSON}
-                    className="bg-purple-600 hover:bg-purple-700"
-                  >
-                    <Copy className="mr-2 h-5 w-5" />
-                    Copy Full JSON
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          onClick={handleCopyJSON}
+                          className="bg-purple-600 hover:bg-purple-700"
+                          disabled={isCopying}
+                        >
+                          {isCopying ? (
+                            <>
+                              <Check className="mr-2 h-5 w-5" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="mr-2 h-5 w-5" />
+                              Copy Full JSON
+                            </>
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {isCopying ? 'JSON copied to clipboard!' : 'Copy vertex and edge data'}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div>
                   <h2 className="text-xl mb-2 font-semibold flex items-center gap-2">
                     <MapPin className="h-5 w-5 text-blue-600" />
                     Vertices ({vertices.length})
                   </h2>
-                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
+                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border text-sm">
                     {JSON.stringify(vertices, null, 2)}
                   </pre>
                 </div>
@@ -348,7 +414,7 @@ function SVGVertexMapper() {
                     <GitGraph className="h-5 w-5 text-green-600" />
                     Edges ({edges.length})
                   </h2>
-                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border">
+                  <pre className="bg-gray-100 p-4 rounded-lg max-h-64 overflow-auto border text-sm">
                     {JSON.stringify(edges, null, 2)}
                   </pre>
                 </div>
@@ -356,7 +422,6 @@ function SVGVertexMapper() {
             </div>
           </div>
         )}
-
         {!svgContent && (
           <div className="text-center py-12 bg-gray-100 rounded-lg">
             <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
