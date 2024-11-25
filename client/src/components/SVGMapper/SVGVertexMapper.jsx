@@ -171,6 +171,8 @@ function SVGVertexMapper() {
   };
 
   const handleFileUpload = (file) => {
+    if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = (e) => {
       const svgString = e.target.result;
