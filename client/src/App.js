@@ -1,10 +1,12 @@
 import React from 'react';
-import SVGVertexMapper from './SVGVertexMapper';
+import { Toaster } from "./components/ui/toaster";
+import SVGVertexMapper from './components/SVGMapper/SVGVertexMapper';
 import './App.css';
 
 function App() {
   return (
     <div className="App">
+      <Toaster />
       <SVGVertexMapper />
     </div>
   );
